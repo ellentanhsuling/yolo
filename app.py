@@ -1,5 +1,4 @@
 import streamlit as st
-import torch
 import cv2
 import numpy as np
 import tempfile
@@ -19,7 +18,7 @@ def main():
     # Title and introduction
     st.title("YOLO Object Detection")
     st.markdown("""
-    This app uses YOLOv5 to detect objects in images and videos. 
+    This app uses YOLOv8 to detect objects in images and videos. 
     Upload an image or video and adjust the detection parameters to see the results.
     """)
     
@@ -34,20 +33,9 @@ def main():
         help="Higher values filter out less confident detections"
     )
     
-    iou_threshold = st.sidebar.slider(
-        "IoU Threshold", 
-        min_value=0.1, 
-        max_value=1.0, 
-        value=0.45, 
-        step=0.05,
-        help="Higher values allow more overlap between boxes"
-    )
-    
     # Load model
     with st.spinner("Loading YOLO model..."):
         model = download_model()
-        model.conf = conf_threshold  # confidence threshold
-        model.iou = iou_threshold    # NMS IoU threshold
     
     # Model info
     model_info = get_model_info(model)
@@ -65,11 +53,11 @@ def main():
     file_type = st.radio("Select input type:", ["Image", "Video"])
     
     if file_type == "Image":
-        process_image(model)
+        process_image(model, conf_threshold)
     else:
-        process_video(model)
+        process_video(model, conf_threshold)
 
-def process_image(model):
+def process_image(model, conf_threshold):
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
     
     if uploaded_file is not None:
@@ -85,37 +73,46 @@ def process_image(model):
                 
                 # Run detection
                 start_time = time.time()
-                results = model(img_array)
+                results = model.predict(img_array, conf=conf_threshold)[0]
                 end_time = time.time()
                 
                 # Show detection time
                 st.info(f"Detection completed in {end_time - start_time:.2f} seconds")
                 
                 # Display results
-                result_image = Image.fromarray(results.render()[0])
-                st.image(result_image, caption="Detection Result", use_column_width=True)
+                boxes = results.boxes
+                
+                # Plot results on the image
+                result_img = results.plot()
+                st.image(result_img, caption="Detection Result", use_column_width=True)
                 
                 # Show detection details
                 st.subheader("Detection Details")
-                result_df = results.pandas().xyxy[0]  # Get detection results as DataFrame
-                if len(result_df) > 0:
-                    # Format the DataFrame for display
-                    result_df = result_df.rename(columns={
-                        'xmin': 'X Min', 
-                        'ymin': 'Y Min', 
-                        'xmax': 'X Max', 
-                        'ymax': 'Y Max', 
-                        'confidence': 'Confidence', 
-                        'class': 'Class ID', 
-                        'name': 'Object'
-                    })
-                    result_df = result_df[['Object', 'Confidence', 'X Min', 'Y Min', 'X Max', 'Y Max']]
-                    result_df['Confidence'] = result_df['Confidence'].apply(lambda x: f"{x:.2f}")
-                    st.dataframe(result_df)
+                if len(boxes) > 0:
+                    # Create a DataFrame-like display
+                    data = []
+                    for box in boxes:
+                        # Get box data
+                        class_id = int(box.cls.item())
+                        conf = box.conf.item()
+                        xyxy = box.xyxy[0].tolist()
+                        
+                        # Add to data
+                        data.append({
+                            "Object": model.names[class_id],
+                            "Confidence": f"{conf:.2f}",
+                            "X Min": f"{xyxy[0]:.1f}",
+                            "Y Min": f"{xyxy[1]:.1f}",
+                            "X Max": f"{xyxy[2]:.1f}",
+                            "Y Max": f"{xyxy[3]:.1f}"
+                        })
+                    
+                    # Display results
+                    st.table(data)
                 else:
                     st.write("No objects detected.")
 
-def process_video(model):
+def process_video(model, conf_threshold):
     uploaded_file = st.file_uploader("Choose a video...", type=["mp4", "avi", "mov"])
     
     if uploaded_file is not None:
@@ -169,10 +166,10 @@ def process_video(model):
                     status_text.text(f"Processing frame {frame_count}/{total_frames} ({progress}%)")
                     
                     # Perform detection
-                    results = model(frame)
+                    results = model.predict(frame, conf=conf_threshold)[0]
                     
                     # Draw detections on frame
-                    annotated_frame = results.render()[0]
+                    annotated_frame = results.plot()
                     
                     # Write frame to output video
                     out.write(annotated_frame)

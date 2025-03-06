@@ -61,8 +61,8 @@ def process_image(model, conf_threshold):
     uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
     
     if uploaded_file is not None:
-        # Read image
-        image = Image.open(uploaded_file)
+        # Read image and convert to RGB
+        image = Image.open(uploaded_file).convert('RGB')  # Convert to RGB to ensure 3 channels
         st.image(image, caption="Uploaded Image", use_column_width=True)
         
         # Perform detection on button click
@@ -165,11 +165,17 @@ def process_video(model, conf_threshold):
                     progress_bar.progress(progress)
                     status_text.text(f"Processing frame {frame_count}/{total_frames} ({progress}%)")
                     
+                    # Ensure frame is in RGB (CV2 reads as BGR)
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
                     # Perform detection
-                    results = model.predict(frame, conf=conf_threshold)[0]
+                    results = model.predict(frame_rgb, conf=conf_threshold)[0]
                     
                     # Draw detections on frame
                     annotated_frame = results.plot()
+                    
+                    # Convert back to BGR for OpenCV
+                    annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
                     
                     # Write frame to output video
                     out.write(annotated_frame)
